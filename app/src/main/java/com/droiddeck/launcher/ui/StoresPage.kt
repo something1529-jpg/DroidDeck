@@ -216,6 +216,7 @@ internal fun StoresPage(s: FrontEndState, a: FrontEndActions, modifier: Modifier
             }
         }
         if (chip == Store.EPIC.id) {
+            com.droiddeck.launcher.stores.heroic.HeroicLauncher.ensure(ctx)
             EpicClient.ensure(ctx)
             while (true) {
                 if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) EpicClient.refresh(ctx)
@@ -962,7 +963,10 @@ private fun ProfileStrip(store: Store, owned: Int, loaded: Boolean, s: FrontEndS
                 SignOutButton(store, name)
             }
         }
-        if (store == Store.EPIC) EpicLauncherRow(s, a)
+        if (store == Store.EPIC) {
+            BundledLauncherRow(com.droiddeck.launcher.stores.launcher.BundledLaunchers.epic, s, a)
+            BundledLauncherRow(com.droiddeck.launcher.stores.launcher.BundledLaunchers.heroic, s, a)
+        }
         if (store == Store.BATTLENET) BattleNetLauncherRow(s, a)
     }
 }
@@ -1000,30 +1004,28 @@ private fun BattleNetLauncherRow(s: FrontEndState, a: FrontEndActions) {
 }
 
 @Composable
-private fun EpicLauncherRow(s: FrontEndState, a: FrontEndActions) {
+private fun BundledLauncherRow(launcher: com.droiddeck.launcher.stores.launcher.BundledLauncher, s: FrontEndState, a: FrontEndActions) {
     val ctx = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
-    val epic = EpicClient.status
-    val title = stringResource(R.string.epic_client_title)
     Box(Modifier.fillMaxWidth().height(1.dp).background(pal.line))
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().testTag("stores-epic-launcher")) {
-        val icon by androidx.compose.runtime.produceState<java.io.File?>(null, epic.version) {
-            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { EpicClient.icon(ctx, epic.version) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().testTag("stores-${launcher.library}")) {
+        val icon by androidx.compose.runtime.produceState<java.io.File?>(null, launcher.version) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { launcher.icon(ctx) }
         }
         if (icon != null) AsyncImage(model = icon, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)))
         Column(Modifier.weight(1f)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val version = epic.version?.substringBefore('+')
+            Text(launcher.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val version = launcher.version?.substringBefore('+')
             Text(
-                if (epic.installed && version != null) stringResource(R.string.epic_client_version, version) else stringResource(R.string.epic_client_missing),
+                if (launcher.installed && version != null) stringResource(R.string.epic_client_version, version) else stringResource(R.string.epic_client_missing),
                 fontSize = 12.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
         Actions {
-            if (epic.installed) {
-                SecondaryButton(stringResource(R.string.epic_client_open), enabled = !s.busy, compact = true) { a.onEpicLauncher() }
-                val entry = remember(epic, title) { EpicClient.launcherEntry(ctx, title, epic, null) }
+            if (launcher.installed) {
+                SecondaryButton(stringResource(R.string.epic_client_open), enabled = !s.busy, compact = true) { a.onLauncher(launcher) }
+                val entry = remember(launcher.library, launcher.version) { launcher.entry(ctx) }
                 val scope = entry?.let { com.droiddeck.launcher.session.NoSteamLaunch.scope(it) }
                 if (entry != null && scope != null) {
                     val host = rememberMenuHost()
@@ -1035,9 +1037,9 @@ private fun EpicLauncherRow(s: FrontEndState, a: FrontEndActions) {
                         GameSettingsMenus(host, entry, settings)
                     }
                 }
-                UninstallEpicLauncher(s, a)
+                UninstallLauncher(launcher, s, a)
             } else SecondaryButton(stringResource(R.string.epic_client_install), compact = true) {
-                EpicClient.install(ctx)
+                launcher.install(ctx)
                 StoresState.openDownloads = true
             }
         }

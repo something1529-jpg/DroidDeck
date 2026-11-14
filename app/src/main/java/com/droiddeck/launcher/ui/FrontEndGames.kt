@@ -59,16 +59,16 @@ internal fun GameFileFolderActions(s: FrontEndState, a: FrontEndActions) {
 
 
 @Composable
-internal fun UninstallEpicLauncher(s: FrontEndState, a: FrontEndActions) {
+internal fun UninstallLauncher(launcher: com.droiddeck.launcher.stores.launcher.BundledLauncher, s: FrontEndState, a: FrontEndActions) {
     var asking by remember { androidx.compose.runtime.mutableStateOf(false) }
     SecondaryButton(stringResource(R.string.common_uninstall), enabled = !s.busy, compact = true) { asking = true }
     if (asking) {
-        val body = stringResource(R.string.epic_client_uninstall_body)
+        val body = stringResource(R.string.launcher_uninstall_body, launcher.name)
         ConfirmDialog(
-            title = stringResource(R.string.stores_uninstall_title, stringResource(R.string.epic_client_title)),
+            title = stringResource(R.string.stores_uninstall_title, launcher.name),
             text = if (s.sessionRunning) body + "\n\n" + stringResource(R.string.epic_client_uninstall_stops) else body,
             confirm = stringResource(R.string.common_uninstall),
-            onConfirm = { a.onUninstallEpicLauncher() },
+            onConfirm = { a.onUninstallLauncher(launcher) },
             onDismiss = { asking = false },
         )
     }

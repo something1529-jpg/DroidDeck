@@ -24,6 +24,7 @@ import com.droiddeck.launcher.stores.StoresState
 import com.droiddeck.launcher.stores.WebCookies
 import com.droiddeck.launcher.stores.download.DownloadEntry
 import com.droiddeck.launcher.stores.download.DownloadQueue
+import com.droiddeck.launcher.stores.launcher.BundledUpdates
 import com.droiddeck.launcher.stores.SteamLiveShortcuts
 import org.json.JSONObject
 import java.io.File
@@ -49,8 +50,6 @@ object EpicClient {
     private const val FEX_WANTED = "root/.config/droiddeck/fex-wanted"
     private const val ICON = "epic-games-launcher.png"
     const val LAUNCHER_APP_ID = 0
-    private const val PREF_CHECKED = "client_checked_at"
-    private const val CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
     private const val IMPORT_EVERY_MS = 15_000L
     private const val STATE = "root/.local/share/droiddeck-epic"
     private const val DATA = "root/.local/share/com.epicgames.eglv2"
@@ -88,7 +87,7 @@ object EpicClient {
         return if (path.startsWith("$root/")) "/" + path.removePrefix("$root/") else null
     }
 
-    private fun ready(dir: File): Boolean = File(dir, ".droiddeck-ready").isFile
+    private fun ready(dir: File): Boolean = BundledUpdates.ready(dir)
 
     internal fun canHandOff(context: Context): Boolean = EpicCredentialStore.isLoggedIn(context.applicationContext)
 
@@ -127,7 +126,7 @@ object EpicClient {
         val version = current?.optString("app")?.ifEmpty { null }
         val runtimeVersion = current?.optString("runtime")?.ifEmpty { null }
         val installed = version != null && runtimeVersion != null &&
-            ready(File(state, "app/$version")) && ready(File(state, "runtime/$runtimeVersion"))
+            BundledUpdates.ready(File(state, "app/$version")) && BundledUpdates.ready(File(state, "runtime/$runtimeVersion"))
         return Status(installed, version, runtimeVersion)
     }
 
@@ -152,19 +151,18 @@ object EpicClient {
             StoresState.post { if (status != before) status = before }
             if (DownloadQueue.isActive(DOWNLOAD_KEY) || !before.installed) return@execute
             syncLibrary(app)
-            val prefs = EpicPrefs.get(app)
-            val now = System.currentTimeMillis()
-            if (now - prefs.getLong(PREF_CHECKED, 0L) < CHECK_EVERY_MS) return@execute
-            val latest = EpicClientSources.launcher()?.version
-            prefs.edit().putLong(PREF_CHECKED, if (latest != null) now else 0L).apply()
+            BundledUpdates.ensure(
+                stateDir(app), EpicPrefs.get(app),
+                latest = { EpicClientSources.launcher()?.version },
+                install = { StoresState.post { enqueue(app) } },
+            )
             val after = read(app)
             StoresState.post { if (status != after) status = after }
-            if (updateWanted(after, latest)) StoresState.post { enqueue(app) }
         }
     }
 
     internal fun updateWanted(current: Status, latest: String?): Boolean =
-        current.installed && latest != null && latest != current.version
+        current.installed && BundledUpdates.newer(current.version, latest)
 
     @Volatile var uninstalling = false
 
@@ -190,7 +188,7 @@ object EpicClient {
 
     internal fun installed(context: Context) {
         val app = context.applicationContext
-        EpicPrefs.get(app).edit().putLong(PREF_CHECKED, System.currentTimeMillis()).apply()
+        EpicPrefs.get(app).edit().putLong(BundledUpdates.CHECKED_AT, System.currentTimeMillis()).apply()
         refresh(app)
         work.execute { syncLibrary(app) }
     }

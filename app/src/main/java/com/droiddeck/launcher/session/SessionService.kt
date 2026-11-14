@@ -854,7 +854,8 @@ class SessionService : Service() {
     }
 
     private fun noSteamGame(): Boolean =
-        SessionState.mode == MODE_RUN && SessionState.program in setOf(NoSteamLaunch.PROTON_RUN, NoSteamLaunch.EPIC, NoSteamLaunch.BATTLENET)
+        SessionState.mode == MODE_RUN &&
+            SessionState.program in setOf(NoSteamLaunch.PROTON_RUN, NoSteamLaunch.EPIC, NoSteamLaunch.BATTLENET, NoSteamLaunch.HEROIC)
 
     private fun startAudio(guest: MutableList<String>, sessionDir: File, directAudioPack: Boolean): PulseAudioComponent {
         val wantsDirectAudio = directAudioPack &&
@@ -1818,7 +1819,7 @@ class SessionService : Service() {
         val stoppedGen = sessionGen
         val stoppedSession = SessionState.sessionId
         val launcherEnded = SessionState.mode == MODE_STEAM || SessionState.mode == MODE_DESKTOP || SessionState.program == NoSteamLaunch.EPIC ||
-            SessionState.program == NoSteamLaunch.BATTLENET
+            SessionState.program == NoSteamLaunch.BATTLENET || SessionState.program == NoSteamLaunch.HEROIC
         SessionState.stopRequested = false
         GpuClockPin.stop(this)
         GameThreadHints.stop()

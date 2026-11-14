@@ -837,14 +837,18 @@ class FrontEndActivity : ComponentActivity() {
                 com.droiddeck.launcher.stores.epic.EpicClient.gameId(com.droiddeck.launcher.stores.epic.EpicClient.shortcutAppId))
 
     private fun uninstallEpicLauncher() {
-        if (com.droiddeck.launcher.stores.epic.EpicClient.uninstalling) return
-        com.droiddeck.launcher.stores.epic.EpicClient.uninstalling = true
         pendingSwitch?.takeIf(::opensEpicLauncher)?.let { pendingSwitch = null }
         switchingTo?.takeIf(::opensEpicLauncher)?.let {
             switchPoll?.let { poll -> ui.removeCallbacks(poll) }
             switchPoll = null
             switchingTo = null
         }
+        uninstallBundledLauncher(com.droiddeck.launcher.stores.launcher.BundledLaunchers.epic)
+    }
+
+    private fun uninstallBundledLauncher(launcher: com.droiddeck.launcher.stores.launcher.BundledLauncher) {
+        if (launcher.busy) return
+        launcher.busy = true
         if (SessionState.running) SessionService.stop(this)
         val app = applicationContext
         val deadline = android.os.SystemClock.uptimeMillis() + SESSION_SWITCH_WAIT_MS
@@ -854,16 +858,36 @@ class FrontEndActivity : ComponentActivity() {
             }
             val ended = !SessionState.running && SessionState.phase in SESSION_ENDED
             val done = try {
-                ended && com.droiddeck.launcher.stores.epic.EpicClient.uninstall(app)
+                ended && launcher.uninstall(app)
             } finally {
-                com.droiddeck.launcher.stores.epic.EpicClient.uninstalling = false
+                launcher.busy = false
             }
             ui.post {
                 if (!isDestroyed) refresh()
-                android.widget.Toast.makeText(app, if (done) R.string.epic_client_uninstalled else R.string.epic_client_uninstall_failed,
-                    android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(app, app.getString(
+                    if (done) R.string.launcher_uninstalled else R.string.launcher_uninstall_failed, launcher.name,
+                ), android.widget.Toast.LENGTH_LONG).show()
             }
-        }, "epic-uninstall").start()
+        }, "launcher-uninstall").start()
+    }
+
+    private fun openBundledLauncher(launcher: com.droiddeck.launcher.stores.launcher.BundledLauncher): Boolean {
+        if (launcher.busy) {
+            android.widget.Toast.makeText(this, getString(R.string.launcher_uninstalling, launcher.name), android.widget.Toast.LENGTH_SHORT).show()
+            return false
+        }
+        if (pkgStage != null) {
+            android.widget.Toast.makeText(this, R.string.main_wait_install_game, android.widget.Toast.LENGTH_SHORT).show()
+            return false
+        }
+        launcher.refresh(this)
+        val entry = launcher.entry(this)
+        if (entry == null) {
+            launcher.install(this)
+            com.droiddeck.launcher.stores.StoresState.openDownloads = true
+            return true
+        }
+        return launchWithoutSteam(entry, false)
     }
 
     private fun openEpicLauncher(): Boolean {
@@ -884,7 +908,7 @@ class FrontEndActivity : ComponentActivity() {
             return true
         }
         if (com.droiddeck.launcher.session.NoSteamLaunch.enabled(this, com.droiddeck.launcher.stores.epic.EpicClient.shortcutAppId)) {
-            com.droiddeck.launcher.stores.epic.EpicClient.launcherEntry(this, Library.EPIC_LAUNCHER_NAME)?.let { return launchWithoutSteam(it, false) }
+            return openBundledLauncher(com.droiddeck.launcher.stores.launcher.BundledLaunchers.epic)
         }
         val launcher = Intent(this, SessionActivity::class.java)
             .putExtra(SessionActivity.EXTRA_RETURN_HOME, false)
@@ -1122,8 +1146,12 @@ class FrontEndActivity : ComponentActivity() {
                                 com.droiddeck.launcher.stores.StoreLaunch.prepare(this, g) { launchGame(g) }
                             }
                         },
-                        onEpicLauncher = { openEpicLauncher() },
-                        onUninstallEpicLauncher = { uninstallEpicLauncher() },
+                        onLauncher = { launcher ->
+                            if (launcher.library == Library.EPIC_LAUNCHER) openEpicLauncher() else openBundledLauncher(launcher)
+                        },
+                        onUninstallLauncher = { launcher ->
+                            if (launcher.library == Library.EPIC_LAUNCHER) uninstallEpicLauncher() else uninstallBundledLauncher(launcher)
+                        },
                         onGameShortcut = { g -> com.droiddeck.launcher.frontend.GameShortcuts.pin(this, g) },
                         onExportGameFile = { g -> pickGameExport(g) },
                         onSyncGameFiles = { pickGameExport(null) },

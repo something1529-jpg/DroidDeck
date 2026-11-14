@@ -90,6 +90,8 @@ object SessionFiles {
             "usr/local/bin/droiddeck-battlenet" to "usr/local/bin/droiddeck-battlenet",
             "usr/local/bin/droiddeck-epic" to "usr/local/bin/droiddeck-epic",
             "usr/local/bin/droiddeck-epic-steam" to "usr/local/bin/droiddeck-epic-steam",
+            "usr/local/bin/droiddeck-heroic" to "usr/local/bin/droiddeck-heroic",
+            "usr/local/bin/droiddeck-heroic-wine" to "usr/local/bin/droiddeck-heroic-wine",
             "usr/local/bin/droiddeck-open-url" to "usr/local/bin/droiddeck-open-url",
             "usr/local/bin/droiddeck-steam-games" to "usr/local/bin/droiddeck-steam-games",
             "usr/local/bin/droiddeck-pad-defaults" to "usr/local/bin/droiddeck-pad-defaults",

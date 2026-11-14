@@ -1,0 +1,254 @@
+#!/usr/bin/python3
+"""Starts Heroic Games Launcher inside a DroidDeck session.
+
+Heroic launches its games through DroidDeck's ARM64 Proton, because the Wine
+build droiddeck-heroic-wine installs here is what Heroic lists as its Wine
+version. The AppImage is unpacked once so every later session starts from the
+unpacked tree instead of extracting 100 MB into /tmp again.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+HOME = os.environ.get("HOME") or "/root"
+BIN_DIR = os.path.dirname(os.path.abspath(__file__))
+STATE = os.path.join(HOME, ".local", "share", "droiddeck-heroic")
+CURRENT = os.path.join(STATE, "current.json")
+APPS = os.path.join(STATE, "app")
+LOGS = os.path.join(STATE, "logs")
+HEROIC = os.path.join(HOME, ".config", "heroic")
+WINE_NAME = "droiddeck-arm64"
+WINE_BIN = os.path.join(HEROIC, "tools", "wine", WINE_NAME, "bin")
+WRAPPER = "droiddeck-heroic-wine"
+RUNNER = "droiddeck-appimage-run"
+PROTON_EXTRA = "droiddeck-proton-extra"
+STEAM_ROOT = os.path.join(HOME, ".local", "share", "Steam")
+PROTON_SOURCE = "droiddeck"
+VERSION = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
+
+
+def log(message):
+    print("droiddeck-heroic: %s" % message, file=sys.stderr, flush=True)
+
+
+def helper(name):
+    """Helpers sit next to this script; anything missing falls back to the session's bin directory."""
+    local = os.path.join(BIN_DIR, name)
+    return local if os.access(local, os.X_OK) else os.path.join("/usr/local/bin", name)
+
+
+def shim():
+    return "#!/bin/sh\nexec %s \"$@\"\n" % helper(WRAPPER)
+
+
+def current():
+    try:
+        with open(CURRENT, encoding="utf-8") as f:
+            value = json.load(f)
+    except (OSError, ValueError):
+        return None
+    version, name = value.get("app"), value.get("file")
+    if not isinstance(version, str) or not VERSION.match(version):
+        return None
+    if not isinstance(name, str) or "/" in name or not name.endswith(".AppImage"):
+        return None
+    return version, name
+
+
+def appimage():
+    found = current()
+    if found is None:
+        return None
+    version, name = found
+    path = os.path.join(APPS, version, name)
+    return path if os.path.isfile(path) else None
+
+
+def install_wine():
+    try:
+        os.makedirs(WINE_BIN, exist_ok=True)
+        text = shim()
+        for name in ("wine", "wine64", "wineserver"):
+            path = os.path.join(WINE_BIN, name)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    if f.read() == text:
+                        os.chmod(path, 0o755)
+                        continue
+            except OSError:
+                pass
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.chmod(path, 0o755)
+    except OSError as error:
+        log("the Wine build for Heroic could not be written (%s)" % type(error).__name__)
+        return False
+    return True
+
+
+def wine_version():
+    return {
+        "bin": os.path.join(WINE_BIN, "wine"),
+        "name": "Wine - DroidDeck ARM64",
+        "type": "wine",
+        "wineserver": os.path.join(WINE_BIN, "wineserver"),
+    }
+
+
+def seed_config():
+    """Points Heroic's defaults at DroidDeck's Wine without touching what the user set."""
+    path = os.path.join(HEROIC, "config.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    settings = config.get("defaultSettings")
+    if not isinstance(settings, dict):
+        settings = {}
+        config["defaultSettings"] = settings
+    before = json.dumps(config, sort_keys=True)
+    settings.setdefault("wineVersion", wine_version())
+    settings.setdefault("autoInstallDxvk", False)
+    settings.setdefault("autoInstallVkd3d", False)
+    settings.setdefault("autoInstallDxvkNvapi", False)
+    settings.setdefault("enableEsync", False)
+    settings.setdefault("enableFsync", False)
+    settings.setdefault("useGameMode", False)
+    if json.dumps(config, sort_keys=True) == before:
+        return True
+    try:
+        os.makedirs(HEROIC, exist_ok=True)
+        staged = path + ".droiddeck-tmp"
+        with open(staged, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+        os.replace(staged, path)
+    except OSError as error:
+        log("Heroic's settings could not be prepared (%s)" % type(error).__name__)
+        return False
+    log("Heroic uses Wine - DroidDeck ARM64 by default")
+    return True
+
+
+def repair_games():
+    """Games pointed at a Wine build that is not on disk keep failing; point them at DroidDeck's."""
+    folder = os.path.join(HEROIC, "GamesConfig")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                game = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(game, dict):
+            continue
+        chosen = game.get("wineVersion")
+        binary = chosen.get("bin") if isinstance(chosen, dict) else None
+        if not isinstance(binary, str) or os.path.exists(binary):
+            continue
+        game["wineVersion"] = wine_version()
+        try:
+            staged = path + ".droiddeck-tmp"
+            with open(staged, "w", encoding="utf-8") as f:
+                json.dump(game, f, indent=2)
+            os.replace(staged, path)
+            log("%s now uses Wine - DroidDeck ARM64" % name)
+        except OSError:
+            pass
+
+
+def proton_ready():
+    roots = [os.path.join(STEAM_ROOT, "compatibilitytools.d"),
+             "/usr/local/share/steam/compatibilitytools.d",
+             "/usr/share/steam/compatibilitytools.d"]
+    for root in roots:
+        try:
+            entries = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for entry in entries:
+            if os.access(os.path.join(root, entry, "proton"), os.X_OK):
+                return True
+    return False
+
+
+def ensure_proton():
+    """The Wine build runs games through Proton, so fetch one when none is installed."""
+    extra = helper(PROTON_EXTRA)
+    if proton_ready() or not os.access(extra, os.X_OK):
+        return
+    try:
+        os.makedirs(LOGS, exist_ok=True)
+        with open(os.path.join(LOGS, "proton.log"), "ab") as out:
+            subprocess.Popen([extra, STEAM_ROOT, PROTON_SOURCE], stdout=out, stderr=out,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        log("downloading the ARM64 Proton Heroic needs in the background (see %s)" % LOGS)
+    except OSError as error:
+        log("the ARM64 Proton could not be downloaded (%s)" % type(error).__name__)
+
+
+def unpack(image):
+    tree = os.path.dirname(image)
+    if os.access(os.path.join(tree, "app", "AppRun"), os.X_OK):
+        return tree
+    log("unpacking Heroic once, this takes a moment")
+    script = ("cd \"$1\" && rm -rf squashfs-root app && ./\"$2\" --appimage-extract >/dev/null 2>&1 && "
+              "rm -rf app && mv squashfs-root app") 
+    try:
+        run = subprocess.run(["/bin/bash", "-c", script, "unpack", tree, os.path.basename(image)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log("Heroic could not be unpacked (%s)" % type(error).__name__)
+        return None
+    if run.returncode or not os.access(os.path.join(tree, "app", "AppRun"), os.X_OK):
+        log("Heroic could not be unpacked")
+        return None
+    return tree
+
+
+def main(argv):
+    image = appimage()
+    if image is None:
+        log("Heroic is not installed yet; install it from the DroidDeck stores page")
+        return 69
+    tree = unpack(image)
+    if tree is None:
+        return 69
+    install_wine()
+    seed_config()
+    repair_games()
+    ensure_proton()
+    try:
+        with open(os.path.join(tree, "name"), "w", encoding="utf-8") as f:
+            f.write("heroic")
+        with open(os.path.join(tree, "arch"), "w", encoding="utf-8") as f:
+            f.write("arm64")
+        with open(os.path.join(tree, "fex"), "w", encoding="utf-8") as f:
+            f.write("off")
+        os.makedirs(os.path.join(HEROIC, "logs"), exist_ok=True)
+    except OSError:
+        pass
+    env = dict(os.environ)
+    env.pop("APPIMAGE", None)
+    if env.get("DISPLAY"):
+        env.setdefault("XDG_SESSION_TYPE", "x11")
+    runner = helper(RUNNER)
+    try:
+        os.execve(runner, [runner, tree, "--no-sandbox"] + argv, env)
+    except OSError as error:
+        log("Heroic could not start (%s)" % type(error).__name__)
+        return 69
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

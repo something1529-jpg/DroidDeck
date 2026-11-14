@@ -32,6 +32,9 @@ object Library {
     const val EPIC_LAUNCHER = "epic-launcher"
     const val EPIC_LAUNCHER_NAME = "Epic Games Launcher"
     const val BATTLENET_LAUNCHER = "battlenet-launcher"
+    const val HEROIC_LAUNCHER = "heroic-launcher"
+    const val HEROIC_LAUNCHER_NAME = "Heroic Games Launcher"
+    const val SOURCE_HEROIC = "heroic"
     const val XBOX_CLOUD = "xbox-cloud"
     const val SOURCE_STEAM = "steam"
 

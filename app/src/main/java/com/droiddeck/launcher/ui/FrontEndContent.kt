@@ -254,6 +254,10 @@ private fun Content(
         SteamHome(s, a, modifier)
         return
     }
+    if (selected == "heroic") {
+        HeroicHome(s, a, modifier)
+        return
+    }
     if (selected == "store") {
         StorePage(s, a, modifier)
         return

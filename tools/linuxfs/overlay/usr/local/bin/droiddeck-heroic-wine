@@ -1,0 +1,163 @@
+#!/usr/bin/python3
+"""The Wine build Heroic Games Launcher selects as "Wine - DroidDeck ARM64".
+
+Heroic calls this with WINEPREFIX set to the game's own prefix, so the prefix
+Heroic manages is symlinked into the Steam compat data path DroidDeck's ARM64
+Proton expects. Every Windows program Heroic starts, including winecfg and
+winetricks, goes through that Proton.
+"""
+import json
+import os
+import re
+import sys
+import zlib
+
+HOME = os.environ.get("HOME") or "/root"
+STEAM_ROOT = os.path.join(HOME, ".local", "share", "Steam")
+HEROIC = os.path.join(HOME, ".config", "heroic")
+STATE = os.path.join(HOME, ".local", "share", "droiddeck-heroic")
+FALLBACK_PREFIX = os.path.join(HOME, "Games", "Heroic", "Prefixes", "Default")
+TOOL_ROOTS = [
+    os.path.join(STEAM_ROOT, "compatibilitytools.d"),
+    "/usr/local/share/steam/compatibilitytools.d",
+    "/usr/share/steam/compatibilitytools.d",
+    os.path.join(HEROIC, "tools", "proton"),
+]
+PREFERRED = re.compile(r"(droiddeck|ge-?proton.*aarch64|proton.*arm64)", re.I)
+WINESERVER = ("-k", "-w", "-p", "-e", "-q", "-h", "-v", "--help", "--version")
+
+
+def log(message):
+    print("droiddeck-heroic-wine: %s" % message, file=sys.stderr, flush=True)
+
+
+def arm64(folder):
+    """Heroic's Wine manager also installs x86 builds; those cannot run a Windows game here."""
+    for relative in ("files/bin/wine", "dist/bin/wine", "bin/wine"):
+        path = os.path.join(folder, relative)
+        try:
+            with open(path, "rb") as f:
+                head = f.read(20)
+        except OSError:
+            continue
+        if head[:4] != b"\x7fELF":
+            return True
+        machine = head[18] | (head[19] << 8)
+        return machine == 0xB7
+    return True
+
+
+def tools():
+    found = []
+    for root in TOOL_ROOTS:
+        try:
+            entries = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for entry in entries:
+            folder = os.path.join(root, entry)
+            if os.access(os.path.join(folder, "proton"), os.X_OK) and arm64(folder):
+                found.append((entry, folder))
+    found.sort(key=lambda item: (not PREFERRED.search(item[0]), item[0].lower()))
+    return found
+
+
+def wine_server(folder):
+    for relative in ("files/bin/wineserver", "dist/bin/wineserver", "bin/wineserver"):
+        path = os.path.join(folder, relative)
+        if os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def missing():
+    log("no ARM64 Proton is installed yet; DroidDeck downloads one the first time Heroic opens")
+    return 69
+
+
+def prefix_id(prefix):
+    value = zlib.crc32(prefix.encode("utf-8")) % 2 ** 32
+    return value or 1
+
+
+def compat_data(prefix):
+    folder = os.path.join(STEAM_ROOT, "steamapps", "compatdata", str(prefix_id(prefix)))
+    try:
+        os.makedirs(folder, exist_ok=True)
+        link = os.path.join(folder, "pfx")
+        if not os.path.islink(link) and not os.path.exists(link):
+            os.makedirs(prefix, exist_ok=True)
+            os.symlink(os.path.abspath(prefix), link)
+    except OSError as error:
+        log("the prefix at %s could not be prepared (%s)" % (prefix, type(error).__name__))
+        return None
+    return folder
+
+
+def wipe_marker(prefix):
+    """Steam's compat data is not managed by Heroic, so mirror the marker Heroic checks."""
+    try:
+        os.makedirs(STATE, exist_ok=True)
+        path = os.path.join(STATE, "prefixes.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                known = json.load(f)
+            if not isinstance(known, dict):
+                known = {}
+        except (OSError, ValueError):
+            known = {}
+        known[os.path.abspath(prefix)] = prefix_id(prefix)
+        staged = path + ".tmp"
+        with open(staged, "w", encoding="utf-8") as f:
+            json.dump(known, f, indent=2, sort_keys=True)
+        os.replace(staged, path)
+    except OSError:
+        pass
+
+
+def main(argv):
+    available = tools()
+    if not available:
+        return missing()
+    name, folder = available[0]
+    server = wine_server(folder)
+    if argv and os.path.basename(argv[0]) == "wineserver":
+        rest = argv[1:]
+        if server is None:
+            return 0
+        prefix = os.environ.get("WINEPREFIX") or FALLBACK_PREFIX
+        env = dict(os.environ)
+        env.setdefault("WINEPREFIX", prefix)
+        os.execve(server, [server] + (rest or list(WINESERVER)), env)
+    if not argv:
+        log("usage: wine PROGRAM [ARGS...]")
+        return 2
+    if argv[0] in ("--version", "-v"):
+        print("DroidDeck ARM64 (%s)" % name)
+        return 0
+    prefix = os.environ.get("WINEPREFIX") or FALLBACK_PREFIX
+    data = compat_data(prefix)
+    if data is None:
+        return 69
+    wipe_marker(prefix)
+    env = dict(os.environ)
+    env.update({
+        "STEAM_COMPAT_DATA_PATH": data,
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH": STEAM_ROOT,
+        "STEAM_COMPAT_INSTALL_PATH": os.getcwd(),
+        "STEAM_COMPAT_TOOL_PATHS": folder,
+        "PROTONPATH": folder,
+        "WINEPREFIX": prefix,
+    })
+    env.pop("WINEARCH", None)
+    entry = os.path.join(folder, "proton")
+    log("running %s with %s on %s" % (argv[0], name, prefix))
+    try:
+        os.execve(entry, [entry, "run"] + argv, env)
+    except OSError as error:
+        log("Proton could not start (%s)" % type(error).__name__)
+        return 69
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

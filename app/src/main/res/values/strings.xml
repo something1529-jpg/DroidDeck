@@ -1351,6 +1351,7 @@
     <string name="second_terminal">Linux terminal</string>
     <string name="second_terminal_not_ready">The Linux session isn\'t ready for a terminal yet.</string>
     <string name="rail_steam">Steam</string>
+    <string name="rail_heroic">Heroic</string>
     <string name="rail_games">Library</string>
     <string name="rail_desktop">Desktop</string>
     <string name="rail_store">Store</string>
@@ -2467,6 +2468,10 @@
     <string name="epic_client_uninstalled">Epic Games Launcher uninstalled</string>
     <string name="epic_client_uninstall_failed">Some launcher files could not be removed. Try again.</string>
     <string name="epic_client_uninstalling">Wait for the Epic Games Launcher to finish uninstalling</string>
+    <string name="launcher_uninstalling">Wait for %1$s to finish uninstalling</string>
+    <string name="launcher_uninstalled">%1$s uninstalled</string>
+    <string name="launcher_uninstall_failed">Some %1$s files could not be removed. Try again.</string>
+    <string name="launcher_uninstall_body">%1$s is removed and its downloads stop. Games it installed stay on disk, and its sign-in is kept for a later install.</string>
     <string name="store_cloud_saves">Cloud saves</string>
     <string name="cloud_upload">Upload to cloud</string>
     <string name="cloud_download">Download from cloud</string>
@@ -3577,6 +3582,22 @@
     <string name="stores_eyebrow_pass">available with %1$s</string>
     <string name="stores_owned_in_library">Owned games in Library</string>
     <string name="epic_client_missing">Not installed</string>
+    <string name="heroic_title" translatable="false">Heroic Games Launcher</string>
+    <string name="heroic_version">Version %1$s</string>
+    <string name="heroic_missing">Not installed</string>
+    <string name="heroic_install">Install</string>
+    <string name="heroic_play">Play with Heroic</string>
+    <string name="heroic_wordmark" translatable="false">HEROIC</string>
+    <string name="heroic_session_tab">Heroic</string>
+    <string name="heroic_wine_note">Heroic launches its Windows games through Wine - DroidDeck ARM64, the Wine version it lists.</string>
+    <string name="heroic_games_note">Heroic keeps its games and prefixes in its own folders under ~/Games/Heroic.</string>
+    <string name="heroic_session_note">Heroic is running in this session.</string>
+    <string name="heroic_checking">Checking for the latest Heroic release…</string>
+    <string name="heroic_installing">Installing Heroic…</string>
+    <string name="heroic_no_runtime">Install the Linux runtime first</string>
+    <string name="heroic_unreachable">The Heroic release feed did not answer</string>
+    <string name="heroic_download_failed">Heroic download failed: %1$s</string>
+    <string name="heroic_install_failed">Could not install Heroic: %1$s</string>
     <string name="epic_client_open">Open</string>
     <string name="epic_client_install">Install</string>
     <string name="library_filter_added">Added</string>

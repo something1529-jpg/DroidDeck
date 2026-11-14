@@ -10,6 +10,7 @@ object NoSteamLaunch {
     const val PROTON_RUN = "/usr/local/bin/droiddeck-proton-run"
     const val EPIC = "/usr/local/bin/droiddeck-epic"
     const val BATTLENET = com.droiddeck.launcher.runtime.BattleNet.PROGRAM
+    const val HEROIC = com.droiddeck.launcher.stores.heroic.HeroicLauncher.PROGRAM
 
     class Command(val program: String, val args: List<String>, val name: String)
 
@@ -31,7 +32,8 @@ object NoSteamLaunch {
     }.getOrDefault(false)
 
     fun command(game: Library.SteamGame, added: AddedGames.Game?): Command? = when {
-        game.library == Library.EPIC_LAUNCHER -> Command(EPIC, listOf("run"), game.name)
+        com.droiddeck.launcher.stores.launcher.BundledLaunchers.forLibrary(game.library) != null ->
+            com.droiddeck.launcher.stores.launcher.BundledLaunchers.commandFor(game)
         game.library == Library.ADDED && game.source == com.droiddeck.launcher.stores.Store.BATTLENET.id ->
             game.storeId?.let(com.droiddeck.launcher.runtime.BattleNet::title)?.let { Command(BATTLENET, listOf("launch", it.code), game.name) }
         game.library == Library.ADDED -> added?.let { a -> a.steamAppId?.let { Command(PROTON_RUN, listOf("--app", it.toString()), a.name) } ?: addedCommand(a) }
@@ -57,6 +59,7 @@ object NoSteamLaunch {
 
     fun nameFor(program: String?, args: List<String>): String? = when (program) {
         EPIC -> Library.EPIC_LAUNCHER_NAME
+        HEROIC -> Library.HEROIC_LAUNCHER_NAME
         BATTLENET -> args.getOrNull(args.indexOf("launch") + 1)?.takeIf { args.contains("launch") }?.let { names[it] } ?: com.droiddeck.launcher.stores.Store.BATTLENET.label
         PROTON_RUN -> args.getOrNull(args.indexOf("--app") + 1)?.takeIf { args.contains("--app") }?.let { names[it] }
         else -> null
