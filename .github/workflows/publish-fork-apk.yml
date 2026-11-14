@@ -1,0 +1,70 @@
+name: Publish fork APK
+
+on:
+  workflow_run:
+    workflows: ["Build APK"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-fork-apk
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Attach the built APKs to a release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Locate the APK build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGERING_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          run_id=${TRIGGERING_RUN:-}
+          if [ -z "$run_id" ]; then
+            run_id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow build.yml --branch main --limit 1 \
+                       --json databaseId --jq '.[0].databaseId // empty')
+          fi
+          if [ -z "$run_id" ]; then
+            echo "::error::No Build APK run found: run Build APK first"
+            exit 1
+          fi
+          sha=$(gh run view "$run_id" -R "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
+          echo "run=$run_id" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=apk-${sha:0:7}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: droiddeck-apk
+          path: out
+          run-id: ${{ steps.build.outputs.run }}
+          github-token: ${{ github.token }}
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.build.outputs.sha }}
+          BUILD_RUN: ${{ steps.build.outputs.run }}
+          TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd out
+          ls -l
+          sha256sum *.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          body="Test build from \`$SHA\`, produced by [Build APK run $BUILD_RUN]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN). Signed with the AOSP testkey, so uninstall any store-installed copy before installing this one."
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber *.apk SHA256SUMS.txt
+          else
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$SHA" --prerelease \
+              --title "Fork APK ${SHA:0:7}" --notes "$body" *.apk SHA256SUMS.txt
+          fi
