@@ -7,6 +7,7 @@ Heroic selects must run through an aarch64 Proton on Heroic's own prefix.
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -41,6 +42,25 @@ exit 0
 PROTON_EXTRA_STUB = """#!/bin/sh
 printf '%s\\n' "$@" > "$HOME/proton-extra.argv"
 exit 0
+"""
+
+EXTRACT_STUB = """#!/bin/sh
+found=
+for dir in $(printf '%s' "${LD_LIBRARY_PATH:-}" | tr ':' ' '); do
+  [ -e "$dir/libz.so" ] && found=$dir
+done
+if [ -z "$found" ]; then
+  echo 'error while loading shared libraries: libz.so: cannot open shared object file' >&2
+  exit 127
+fi
+mkdir -p squashfs-root
+printf '#!/bin/sh\\nexit 0\\n' > squashfs-root/AppRun
+chmod +x squashfs-root/AppRun
+"""
+
+BROKEN_EXTRACT_STUB = """#!/bin/sh
+echo 'Heroic: cannot execute binary file: Exec format error' >&2
+exit 126
 """
 
 
@@ -158,6 +178,28 @@ class HeroicLaunchTest(unittest.TestCase):
                 break
             subprocess.run(['sleep', '0.05'])
         self.assertEqual(verify.read_text(encoding='utf-8').splitlines(), [str(self.steam), 'droiddeck'])
+
+    def test_unpack_lets_the_appimage_runtime_load_the_libz_it_links_against(self):
+        tree = self.state / f'app/{self.version}'
+        shutil.rmtree(tree / 'app')
+        write(self.image, EXTRACT_STUB, 0o755)
+        result = self.run_script('droiddeck-heroic')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(os.access(tree / 'app/AppRun', os.X_OK), 'the AppImage was not unpacked')
+        self.assertEqual(self.read_lines('runner.argv')[0], str(tree))
+        link = self.state / 'lib/libz.so'
+        self.assertTrue(link.is_symlink(), 'the runtime was given no libz.so')
+        self.assertTrue(link.resolve().is_file(), 'the libz.so link points at nothing')
+
+    def test_unpack_reports_the_runtime_error_instead_of_stopping_silently(self):
+        tree = self.state / f'app/{self.version}'
+        shutil.rmtree(tree / 'app')
+        write(self.image, BROKEN_EXTRACT_STUB, 0o755)
+        result = self.run_script('droiddeck-heroic')
+        self.assertEqual(result.returncode, 69)
+        self.assertIn('could not be unpacked', result.stderr)
+        self.assertIn('unpack.log', result.stderr)
+        self.assertIn('cannot execute binary file', result.stderr)
 
     def test_wine_build_runs_the_game_through_the_aarch64_proton_on_the_heroic_prefix(self):
         self.proton('AAA-Proton-x86', X86_64)

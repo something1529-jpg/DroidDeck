@@ -6,6 +6,7 @@ build droiddeck-heroic-wine installs here is what Heroic lists as its Wine
 version. The AppImage is unpacked once so every later session starts from the
 unpacked tree instead of extracting 100 MB into /tmp again.
 """
+import glob
 import json
 import os
 import re
@@ -197,21 +198,57 @@ def ensure_proton():
         log("the ARM64 Proton could not be downloaded (%s)" % type(error).__name__)
 
 
+def library_dir():
+    """The AppImage runtime needs the unversioned libz.so, which only a -dev package ships."""
+    found = []
+    for pattern in ("/lib/*-linux-gnu/libz.so.1", "/usr/lib/*-linux-gnu/libz.so.1", "/lib/libz.so.1",
+                    "/usr/lib/libz.so.1", "/lib64/libz.so.1"):
+        found.extend(sorted(glob.glob(pattern)))
+    if not found:
+        return None
+    folder = os.path.join(STATE, "lib")
+    link = os.path.join(folder, "libz.so")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        if not os.path.islink(link) or os.path.realpath(link) != os.path.realpath(found[0]):
+            if os.path.lexists(link):
+                os.remove(link)
+            os.symlink(found[0], link)
+    except OSError as error:
+        log("the AppImage runtime's libz.so could not be prepared (%s)" % type(error).__name__)
+        return None
+    return folder
+
+
 def unpack(image):
     tree = os.path.dirname(image)
     if os.access(os.path.join(tree, "app", "AppRun"), os.X_OK):
         return tree
     log("unpacking Heroic once, this takes a moment")
-    script = ("cd \"$1\" && rm -rf squashfs-root app && ./\"$2\" --appimage-extract >/dev/null 2>&1 && "
-              "rm -rf app && mv squashfs-root app") 
+    script = ("cd \"$1\" && rm -rf squashfs-root app && ./\"$2\" --appimage-extract >/dev/null && "
+              "rm -rf app && mv squashfs-root app")
+    env = dict(os.environ)
+    libs = library_dir()
+    if libs:
+        env["LD_LIBRARY_PATH"] = libs + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+    report = os.path.join(LOGS, "unpack.log")
     try:
-        run = subprocess.run(["/bin/bash", "-c", script, "unpack", tree, os.path.basename(image)],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        os.makedirs(LOGS, exist_ok=True)
+        with open(report, "wb") as out:
+            run = subprocess.run(["/bin/bash", "-c", script, "unpack", tree, os.path.basename(image)],
+                                 stdout=out, stderr=subprocess.STDOUT, env=env, timeout=600)
     except (OSError, subprocess.TimeoutExpired) as error:
         log("Heroic could not be unpacked (%s)" % type(error).__name__)
         return None
     if run.returncode or not os.access(os.path.join(tree, "app", "AppRun"), os.X_OK):
-        log("Heroic could not be unpacked")
+        log("Heroic could not be unpacked (exit %d, see %s)" % (run.returncode, report))
+        try:
+            with open(report, "rb") as f:
+                tail = f.read()[-2000:].decode("utf-8", "replace").strip().splitlines()
+        except OSError:
+            tail = []
+        for line in tail[-5:]:
+            log(line)
         return None
     return tree
 
